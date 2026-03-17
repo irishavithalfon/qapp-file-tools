@@ -1,0 +1,7 @@
+ "name": "InfoPage+PopUp_QApp",
+    "description": "",
+    "developer": "Iris",
+    "logo": "",
+    "qflowVersions": [
+        "6.1+"
+    ],

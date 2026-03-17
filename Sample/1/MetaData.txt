@@ -1,0 +1,7 @@
+  "name": "Field Agent Management",
+    "description": "אתר סוכני שטח",
+    "developer": "Iris",
+    "logo": "",
+    "qflowVersions": [
+        "6.3"
+    ],
