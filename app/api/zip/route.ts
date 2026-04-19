@@ -19,6 +19,10 @@ function isSafePath(path: string): boolean {
   return true;
 }
 
+function normalizeInputFileName(path: string): string {
+  return path.replace(/^(\.\.[\/\\])+/, "").replace(/^[/\\]+/, "");
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ZipRequestBody;
@@ -31,7 +35,15 @@ export async function POST(request: Request) {
       );
     }
 
+    if (files.length > 10) {
+      return Response.json(
+        { error: "A maximum of 10 files can be zipped in one request." },
+        { status: 400 }
+      );
+    }
+
     const zip = new JSZip();
+    const usedNames = new Set<string>();
 
     for (const fileRef of files) {
       const downloadResponse = await fetch(fileRef.download_link);
@@ -43,28 +55,42 @@ export async function POST(request: Request) {
         );
       }
 
-      const arrayBuffer = await downloadResponse.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
+      const safeName = normalizeInputFileName(fileRef.name);
 
-      if (!isSafePath(fileRef.name)) {
+      if (!isSafePath(safeName)) {
         return Response.json(
           { error: `Invalid file name: ${fileRef.name}` },
           { status: 400 }
         );
       }
 
-      zip.file(fileRef.name, buffer);
+      if (usedNames.has(safeName)) {
+        return Response.json(
+          { error: `Duplicate file name detected: ${safeName}` },
+          { status: 400 }
+        );
+      }
+
+      usedNames.add(safeName);
+
+      const arrayBuffer = await downloadResponse.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+
+      zip.file(safeName, buffer);
     }
 
     const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
-    const outputFileName = body.zipFileName || "archive.zip";
+    const outputFileName = body.zipFileName?.trim() || "archive.zip";
+    const finalZipFileName = outputFileName.toLowerCase().endsWith(".zip")
+      ? outputFileName
+      : `${outputFileName}.zip`;
 
     return Response.json({
-      fileName: outputFileName,
+      fileName: finalZipFileName,
       fileCount: files.length,
       openaiFileResponse: [
         {
-          name: outputFileName,
+          name: finalZipFileName,
           mime_type: "application/zip",
           content: zipBuffer.toString("base64"),
         },
