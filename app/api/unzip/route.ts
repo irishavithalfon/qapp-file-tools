@@ -55,10 +55,6 @@ function getMimeType(fileName: string): string {
   return "application/octet-stream";
 }
 
-function normalizeReturnedFileName(path: string): string {
-  return path.replace(/[\/\\]/g, "__");
-}
-
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as UnzipRequestBody;
@@ -134,16 +130,16 @@ export async function POST(request: Request) {
       });
 
       openaiFileResponse.push({
-        name: normalizeReturnedFileName(entry.name),
+        name: entry.name,
         mime_type: getMimeType(entry.name),
         content: contentBuffer.toString("base64"),
       });
 
-      if (openaiFileResponse.length >= 10) {
+      if (openaiFileResponse.length > 40) {
         return Response.json(
           {
             error:
-              "ZIP contains more than 10 files. Please upload a smaller ZIP or split it.",
+              "ZIP contains more than 40 files. Please upload a smaller ZIP or split it.",
           },
           { status: 400 }
         );
