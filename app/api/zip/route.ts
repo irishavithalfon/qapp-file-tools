@@ -58,7 +58,7 @@ export async function POST(request: Request) {
     const usedPaths = new Set<string>();
 
     for (const fileRef of uploadedFiles) {
-      const overridePath = pathOverrides[fileRef.name];
+      const overridePath = pathOverrides[fileRef.id] ?? pathOverrides[fileRef.name];
       const targetPath = normalizePath(overridePath || fileRef.name);
 
       if (!isSafePath(targetPath)) {
