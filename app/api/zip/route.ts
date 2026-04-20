@@ -25,8 +25,20 @@ function isSafePath(path: string): boolean {
   return true;
 }
 
-function normalizeInputFileName(path: string): string {
+function normalizeRelativePath(path: string): string {
   return path.replace(/^(\.\.[\/\\])+/, "").replace(/^[/\\]+/, "");
+}
+
+function ensureQappExtension(fileName: string): string {
+  const trimmed = fileName.trim();
+
+  if (!trimmed) return "package.qapp";
+  if (trimmed.toLowerCase().endsWith(".qapp")) return trimmed;
+  if (trimmed.toLowerCase().endsWith(".zip")) {
+    return trimmed.slice(0, -4) + ".qapp";
+  }
+
+  return `${trimmed}.qapp`;
 }
 
 export async function POST(request: Request) {
@@ -45,9 +57,9 @@ export async function POST(request: Request) {
 
     const totalFiles = uploadedFiles.length + generatedFiles.length;
 
-    if (totalFiles > 50) {
+    if (totalFiles > 100) {
       return Response.json(
-        { error: "A maximum of 50 files can be zipped in one request." },
+        { error: "A maximum of 100 files can be zipped in one request." },
         { status: 400 }
       );
     }
@@ -56,18 +68,18 @@ export async function POST(request: Request) {
     const usedPaths = new Set<string>();
 
     for (const fileRef of uploadedFiles) {
-      const safeName = normalizeInputFileName(fileRef.name);
+      const relativePath = normalizeRelativePath(fileRef.name);
 
-      if (!isSafePath(safeName)) {
+      if (!isSafePath(relativePath)) {
         return Response.json(
-          { error: `Invalid uploaded file name: ${fileRef.name}` },
+          { error: `Invalid uploaded file path: ${fileRef.name}` },
           { status: 400 }
         );
       }
 
-      if (usedPaths.has(safeName)) {
+      if (usedPaths.has(relativePath)) {
         return Response.json(
-          { error: `Duplicate file path detected: ${safeName}` },
+          { error: `Duplicate file path detected: ${relativePath}` },
           { status: 400 }
         );
       }
@@ -84,14 +96,14 @@ export async function POST(request: Request) {
       const arrayBuffer = await downloadResponse.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
 
-      zip.file(safeName, buffer);
-      usedPaths.add(safeName);
+      zip.file(relativePath, buffer);
+      usedPaths.add(relativePath);
     }
 
     for (const generatedFile of generatedFiles) {
-      const safePath = normalizeInputFileName(generatedFile.path);
+      const relativePath = normalizeRelativePath(generatedFile.path);
 
-      if (!isSafePath(safePath)) {
+      if (!isSafePath(relativePath)) {
         return Response.json(
           { error: `Invalid generated file path: ${generatedFile.path}` },
           { status: 400 }
@@ -105,32 +117,38 @@ export async function POST(request: Request) {
         );
       }
 
-      if (usedPaths.has(safePath)) {
+      if (usedPaths.has(relativePath)) {
         return Response.json(
-          { error: `Duplicate file path detected: ${safePath}` },
+          { error: `Duplicate file path detected: ${relativePath}` },
           { status: 400 }
         );
       }
 
       const buffer = Buffer.from(generatedFile.contentBase64, "base64");
-      zip.file(safePath, buffer);
-      usedPaths.add(safePath);
+      zip.file(relativePath, buffer);
+      usedPaths.add(relativePath);
     }
 
-    const outputFileName = body.zipFileName?.trim() || "archive.zip";
-    const finalZipFileName = outputFileName.toLowerCase().endsWith(".zip")
-      ? outputFileName
-      : `${outputFileName}.zip`;
+    if (!usedPaths.has("config.json")) {
+      return Response.json(
+        {
+          error:
+            "The final Q-App package must include config.json at the root level.",
+        },
+        { status: 400 }
+      );
+    }
 
+    const finalFileName = ensureQappExtension(body.zipFileName || "package.qapp");
     const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
 
     return Response.json({
-      fileName: finalZipFileName,
+      fileName: finalFileName,
       fileCount: totalFiles,
       includedPaths: Array.from(usedPaths),
       openaiFileResponse: [
         {
-          name: finalZipFileName,
+          name: finalFileName,
           mime_type: "application/zip",
           content: zipBuffer.toString("base64"),
         },
@@ -139,7 +157,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return Response.json(
       {
-        error: "Failed to create zip",
+        error: "Failed to create Q-App package",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 }
