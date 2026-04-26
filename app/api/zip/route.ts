@@ -7,10 +7,14 @@ type UploadedFileRef = {
   id?: string;
   fileId?: string;
   name?: string;
+  mime_type?: string;
+  download_link?: string;
 };
 
 type GeneratedFile = {
   name?: string;
+  path?: string;
+  contentBase64?: string;
   targetPath?: string;
   content?: string;
   base64?: string;
@@ -18,6 +22,7 @@ type GeneratedFile = {
 };
 
 type CreateZipRequest = {
+  zipFileName?: string;
   packageName?: string;
   openaiFileIdRefs?: UploadedFileRef[];
   generatedFiles?: GeneratedFile[];
@@ -90,14 +95,16 @@ function resolveUploadedTargetPath(
 }
 
 function resolveGeneratedTargetPath(file: GeneratedFile): string {
-  if (!file.targetPath) {
+  const targetPath = file.path ?? file.targetPath;
+
+  if (!targetPath) {
     throw new Error(
-      `Generated file is missing targetPath. name="${file.name ?? ""}". ` +
+      `Generated file is missing path. name="${file.name ?? ""}". ` +
       `Generated files must declare their exact archive path.`
     );
   }
 
-  return normalizeZipPath(file.targetPath);
+  return normalizeZipPath(targetPath);
 }
 
 async function fetchOpenAIFileContent(fileId: string): Promise<Buffer> {
@@ -124,6 +131,10 @@ async function fetchOpenAIFileContent(fileId: string): Promise<Buffer> {
 }
 
 function decodeGeneratedFile(file: GeneratedFile): Buffer | string {
+  if (file.contentBase64) {
+    return Buffer.from(file.contentBase64, "base64");
+  }
+
   if (file.base64) {
     return Buffer.from(file.base64, "base64");
   }
@@ -136,7 +147,7 @@ function decodeGeneratedFile(file: GeneratedFile): Buffer | string {
     return file.content;
   }
 
-  throw new Error(`Generated file has no content/base64: ${file.targetPath ?? file.name ?? ""}`);
+  throw new Error(`Generated file has no contentBase64/content/base64: ${file.path ?? file.targetPath ?? file.name ?? ""}`);
 }
 
 function assertExactArchiveMatchesExpected(
@@ -210,9 +221,11 @@ async function createZipFromUploadedFiles(req: NextRequest) {
     },
   });
 
-  const packageName = body.packageName?.endsWith(".qapp")
-    ? body.packageName
-    : `${body.packageName ?? "package"}.qapp`;
+  const requestedName = body.zipFileName ?? body.packageName ?? "package.qapp";
+  const packageName =
+    requestedName.endsWith(".qapp") || requestedName.endsWith(".zip")
+      ? requestedName
+      : `${requestedName}.qapp`;
 
   if (body.returnMode === "binary") {
     return new NextResponse(zipBuffer, {
@@ -226,16 +239,22 @@ async function createZipFromUploadedFiles(req: NextRequest) {
 
   return NextResponse.json({
     fileName: packageName,
+    fileCount: writtenPaths.size,
     mimeType: "application/octet-stream",
     base64: zipBuffer.toString("base64"),
-    paths: [...writtenPaths].sort(),
+    includedPaths: [...writtenPaths].sort(),
   });
 }
 
 async function unzipUploadedZip(req: NextRequest) {
   const body = await req.json();
 
-  const fileId = body.fileId ?? body.id;
+  const rawRef = body.openaiFileIdRefs?.[0];
+  const fileId =
+    body.fileId ??
+    body.id ??
+    (typeof rawRef === "string" ? rawRef : rawRef?.id ?? rawRef?.fileId);
+
   if (!fileId) {
     throw new Error("fileId is required");
   }
