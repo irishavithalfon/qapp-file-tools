@@ -181,6 +181,16 @@ async function createZipFromUploadedFiles(req: NextRequest) {
   const pathOverrides = body.pathOverrides ?? {};
   const expectedPaths = body.expectedPaths ?? [];
 
+  const generatedFiles = body.generatedFiles ?? [];
+const uploadedFiles = body.openaiFileIdRefs ?? [];
+
+if (generatedFiles.length === 0 && uploadedFiles.length === 0) {
+  throw new Error(
+    "At least one uploaded file or generated file is required. " +
+    "Send generatedFiles with path/contentBase64 or openaiFileIdRefs with pathOverrides."
+  );
+}
+
   if (!Array.isArray(expectedPaths) || expectedPaths.length === 0) {
     throw new Error("expectedPaths is required and must contain the exact config.json file paths");
   }
@@ -198,19 +208,18 @@ async function createZipFromUploadedFiles(req: NextRequest) {
     writtenPaths.add(targetPath);
   }
 
-  for (const generatedFile of body.generatedFiles ?? []) {
-    const targetPath = resolveGeneratedTargetPath(generatedFile);
-    const content = decodeGeneratedFile(generatedFile);
-    addFile(targetPath, content);
-  }
+ for (const generatedFile of generatedFiles) {
+  const targetPath = resolveGeneratedTargetPath(generatedFile);
+  const content = decodeGeneratedFile(generatedFile);
+  addFile(targetPath, content);
+}
 
-  for (const uploadedRef of body.openaiFileIdRefs ?? []) {
-    const fileId = getUploadedFileId(uploadedRef);
-    const targetPath = resolveUploadedTargetPath(uploadedRef, pathOverrides);
-    const content = await fetchOpenAIFileContent(fileId);
-    addFile(targetPath, content);
-  }
-
+for (const uploadedRef of uploadedFiles) {
+  const fileId = getUploadedFileId(uploadedRef);
+  const targetPath = resolveUploadedTargetPath(uploadedRef, pathOverrides);
+  const content = await fetchOpenAIFileContent(fileId);
+  addFile(targetPath, content);
+}
   assertExactArchiveMatchesExpected([...writtenPaths], expectedPaths);
 
   const zipBuffer = await zip.generateAsync({
@@ -280,11 +289,11 @@ export async function POST(req: NextRequest) {
     const url = new URL(req.url);
     const action = url.pathname.split("/").filter(Boolean).pop();
 
-    if (action === "createZipFromUploadedFiles") {
+    if (action === "zip" || action === "createZipFromUploadedFiles") {
       return await createZipFromUploadedFiles(req);
     }
 
-    if (action === "unzipUploadedZip") {
+    if (action === "unzip" || action === "unzipUploadedZip") {
       return await unzipUploadedZip(req);
     }
 
