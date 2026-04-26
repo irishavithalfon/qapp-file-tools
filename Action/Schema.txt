@@ -1,0 +1,155 @@
+openapi: 3.1.0
+info:
+  title: Q-App File Utility API
+  version: 1.1.0
+
+servers:
+  - url: "https://qapp-file-tools.vercel.app"
+
+paths:
+  /api/unzip:
+    post:
+      operationId: unzipUploadedZip
+      summary: Extract a single uploaded ZIP file from the conversation
+      description: Use this when the user uploaded exactly one ZIP file and you need the extracted files returned to the conversation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                openaiFileIdRefs:
+                  type: array
+                  description: Exactly one uploaded ZIP file from the current conversation.
+                  items:
+                    type: string
+              required:
+                - openaiFileIdRefs
+      responses:
+        "200":
+          description: ZIP extracted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  zipName:
+                    type: string
+                  fileCount:
+                    type: integer
+                  extracted:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        size:
+                          type: integer
+                        isText:
+                          type: boolean
+                  openaiFileResponse:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        mime_type:
+                          type: string
+                        content:
+                          type: string
+
+  /api/zip:
+    post:
+      operationId: createZipFromUploadedFiles
+      summary: Create a ZIP from uploaded files and generated files
+      description: Use this when you want to package uploaded files together with generated files such as config.json into a single ZIP file, while preserving the exact internal paths required by config.json.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                zipFileName:
+                  type: string
+                  description: The output ZIP file name.
+                uploadedFiles:
+                  type: array
+                  description: Preferred explicit mapping. Each uploaded file must include both fileId and targetPath.
+                  items:
+                    type: object
+                    properties:
+                      fileId:
+                        type: string
+                      targetPath:
+                        type: string
+                    required:
+                      - fileId
+                      - targetPath
+                openaiFileIdRefs:
+                  type: array
+                  description: Legacy input. If used, pathOverrides must map every file ID to its target archive path.
+                  items:
+                    oneOf:
+                      - type: string
+                      - type: object
+                        properties:
+                          id:
+                            type: string
+                          fileId:
+                            type: string
+                generatedFiles:
+                  type: array
+                  description: Optional generated files to include in the ZIP, such as config.json or generated rollback scripts.
+                  items:
+                    type: object
+                    properties:
+                      path:
+                        type: string
+                      contentBase64:
+                        type: string
+                    required:
+                      - path
+                      - contentBase64
+                pathOverrides:
+                  type: object
+                  description: Legacy mapping used only with openaiFileIdRefs. Keys must be file IDs (not file names). Values are target archive paths.
+                  additionalProperties:
+                    type: string
+                expectedPaths:
+                  type: array
+                  description: REQUIRED exact archive path list. Must include config.json and exactly match final includedPaths.
+                  items:
+                    type: string
+                returnMode:
+                  type: string
+                  enum:
+                    - base64
+                    - binary
+                  description: Optional output mode. Defaults to base64.
+              required:
+                - zipFileName
+                - expectedPaths
+      responses:
+        "200":
+          description: ZIP created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fileName:
+                    type: string
+                  fileCount:
+                    type: integer
+                  mimeType:
+                    type: string
+                  base64:
+                    type: string
+                  includedPaths:
+                    type: array
+                    items:
+                      type: string

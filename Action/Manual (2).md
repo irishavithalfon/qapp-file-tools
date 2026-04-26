@@ -55,17 +55,35 @@ For each file:
 - Check if instructions and rollbackInstructions were provided by the user
 
 IF ANY of these fields are missing:
+
+This step OVERRIDES any behavior that requests input before suggesting values.
+
+You MUST NOT ask the user to provide instructions or rollbackInstructions
+before first generating suggested values.
+
+Generating suggestions is a mandatory step and cannot be skipped under any condition.
+
+You MUST FIRST:
+- Inform the user that required fields are missing
+- Explicitly state that you will provide suggested values
+
+You MUST say in natural language (not JSON), in the same language used in the conversation:
+"I see that you did not provide instructions and/or rollbackInstructions. I will suggest a default text. You can approve or replace it."
+
+IMMEDIATELY AFTER THAT:
+
 You MUST immediately generate:
 - A suggested instructions text
 - A suggested rollbackInstructions text
 
 Rules for suggestions:
-- MUST be clearly marked as "SUGGESTED"
+- MUST be clearly presented as suggested values OUTSIDE of the JSON content
 - MUST be JSON-safe
 - MUST NOT be automatically used
 - MUST NOT be inserted into config.json without explicit user approval
+- MUST NOT include the word "SUGGESTED" inside instructions or rollbackInstructions values
 
-You MUST then ask the user to:
+You MUST then allow the user to:
 - Approve
 - Edit
 - Or replace the suggested values
@@ -98,27 +116,6 @@ Manual config block:
 }
 
 All fields are mandatory.
----
-
-#MISSING INSTRUCTIONS
-
-If any uploaded manual file lacks:
-- instructions
-- rollbackInstructions
-
-You MUST:
-
-1. List missing file names explicitly.
-2. Ask user to provide JSON-safe instructions and rollbackInstructions.
-3. Not generate config.json or ZIP until provided.
-4. Not infer or auto-generate.
-
-Also ask optionally:
-
-"Would you like me to suggest a short default instruction text that you can choose to use or edit?"
-
-Only provide suggestion if user explicitly approves.
-
 ---
 
 #MANUAL WITHOUT FILE
