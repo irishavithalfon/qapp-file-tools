@@ -6,9 +6,11 @@ export const runtime = "nodejs";
 type UploadedFileRef = {
   id?: string;
   fileId?: string;
-  name?: string;
-  mime_type?: string;
-  download_link?: string;
+};
+
+type UploadedFileWithTarget = {
+  fileId: string;
+  targetPath: string;
 };
 
 type GeneratedFile = {
@@ -24,22 +26,25 @@ type GeneratedFile = {
 type CreateZipRequest = {
   zipFileName?: string;
   packageName?: string;
-  openaiFileIdRefs?: UploadedFileRef[];
+
+  // Legacy shape. Kept for backward compatibility.
+  openaiFileIdRefs?: Array<string | UploadedFileRef>;
+  // Preferred shape. Explicitly binds each uploaded file to its target path.
+  uploadedFiles?: UploadedFileWithTarget[];
   generatedFiles?: GeneratedFile[];
+  // Legacy mapping for openaiFileIdRefs only. Keys must be file IDs.
   pathOverrides?: Record<string, string>;
 
-  /**
-   * REQUIRED.
-   * Exact list of file paths that config.json references.
-   * Must include config.json.
-   */
+  // REQUIRED: exact list of paths that must exist in the archive.
   expectedPaths: string[];
 
-  /**
-   * Optional.
-   * Defaults to "base64" because Custom Actions usually handle JSON better than binary.
-   */
+  // Optional: defaults to base64 (better for JSON-based Action responses).
   returnMode?: "base64" | "binary";
+};
+
+type ResolvedUploadedFile = {
+  fileId: string;
+  targetPath: string;
 };
 
 function normalizeZipPath(input: string): string {
@@ -54,9 +59,13 @@ function normalizeZipPath(input: string): string {
   if (
     !p ||
     p.includes("\0") ||
+    p === "." ||
+    p.startsWith("./") ||
+    p.includes("/./") ||
+    p === ".." ||
     p.startsWith("../") ||
     p.includes("/../") ||
-    p === ".." ||
+    p.endsWith("/") ||
     p.includes("//")
   ) {
     throw new Error(`Unsafe or invalid ZIP path: ${input}`);
@@ -65,33 +74,21 @@ function normalizeZipPath(input: string): string {
   return p;
 }
 
-function getUploadedFileId(ref: UploadedFileRef): string {
+function getUploadedFileId(ref: string | UploadedFileRef): string {
+  if (typeof ref === "string") {
+    const id = ref.trim();
+    if (!id) {
+      throw new Error("Uploaded file ID cannot be empty");
+    }
+    return id;
+  }
+
   const id = ref.id ?? ref.fileId;
-  if (!id) {
+  if (!id || !id.trim()) {
     throw new Error(`Uploaded file reference is missing id/fileId: ${JSON.stringify(ref)}`);
   }
-  return id;
-}
 
-function resolveUploadedTargetPath(
-  ref: UploadedFileRef,
-  pathOverrides: Record<string, string>
-): string {
-  const id = getUploadedFileId(ref);
-
-  const byId = pathOverrides[id];
-  const byName = ref.name ? pathOverrides[ref.name] : undefined;
-
-  const targetPath = byId ?? byName;
-
-  if (!targetPath) {
-    throw new Error(
-      `Missing explicit pathOverride for uploaded file id="${id}" name="${ref.name ?? ""}". ` +
-      `Do not rely on uploaded filenames as ZIP paths.`
-    );
-  }
-
-  return normalizeZipPath(targetPath);
+  return id.trim();
 }
 
 function resolveGeneratedTargetPath(file: GeneratedFile): string {
@@ -100,34 +97,11 @@ function resolveGeneratedTargetPath(file: GeneratedFile): string {
   if (!targetPath) {
     throw new Error(
       `Generated file is missing path. name="${file.name ?? ""}". ` +
-      `Generated files must declare their exact archive path.`
+        "Generated files must declare their exact archive path."
     );
   }
 
   return normalizeZipPath(targetPath);
-}
-
-async function fetchOpenAIFileContent(fileId: string): Promise<Buffer> {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
-  }
-
-  const response = await fetch(`https://api.openai.com/v1/files/${fileId}/content`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Failed to fetch OpenAI file ${fileId}: ${response.status} ${text}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
 }
 
 function decodeGeneratedFile(file: GeneratedFile): Buffer | string {
@@ -147,7 +121,9 @@ function decodeGeneratedFile(file: GeneratedFile): Buffer | string {
     return file.content;
   }
 
-  throw new Error(`Generated file has no contentBase64/content/base64: ${file.path ?? file.targetPath ?? file.name ?? ""}`);
+  throw new Error(
+    `Generated file has no contentBase64/content/base64: ${file.path ?? file.targetPath ?? file.name ?? ""}`
+  );
 }
 
 function assertExactArchiveMatchesExpected(
@@ -173,28 +149,101 @@ function assertExactArchiveMatchesExpected(
   }
 }
 
+function resolveUploadedFiles(body: CreateZipRequest): ResolvedUploadedFile[] {
+  const uploadedFiles = body.uploadedFiles ?? [];
+  const openaiRefs = body.openaiFileIdRefs ?? [];
+  const pathOverrides = body.pathOverrides ?? {};
+
+  if (uploadedFiles.length > 0 && openaiRefs.length > 0) {
+    throw new Error(
+      "Use either uploadedFiles or openaiFileIdRefs. Do not send both in one request."
+    );
+  }
+
+  if (uploadedFiles.length > 0) {
+    return uploadedFiles.map((item) => ({
+      fileId: getUploadedFileId(item.fileId),
+      targetPath: normalizeZipPath(item.targetPath),
+    }));
+  }
+
+  const resolvedFromLegacy = openaiRefs.map((ref) => {
+    const fileId = getUploadedFileId(ref);
+    const targetPathRaw = pathOverrides[fileId];
+
+    if (!targetPathRaw) {
+      throw new Error(
+        `Missing explicit pathOverride for uploaded file ID: ${fileId}. ` +
+          "Do not rely on file names or implicit archive paths."
+      );
+    }
+
+    return {
+      fileId,
+      targetPath: normalizeZipPath(targetPathRaw),
+    };
+  });
+
+  const refIdSet = new Set(resolvedFromLegacy.map((item) => item.fileId));
+
+  for (const overrideKey of Object.keys(pathOverrides)) {
+    if (!refIdSet.has(overrideKey)) {
+      throw new Error(
+        `pathOverrides contains key "${overrideKey}" that is not a file ID in openaiFileIdRefs.`
+      );
+    }
+  }
+
+  return resolvedFromLegacy;
+}
+
+async function fetchOpenAIFileContent(fileId: string): Promise<Buffer> {
+  const apiKey = process.env.OPENAI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not configured");
+  }
+
+  const response = await fetch(`https://api.openai.com/v1/files/${fileId}/content`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Failed to fetch OpenAI file ${fileId}: ${response.status} ${text}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
 async function createZipFromUploadedFiles(req: NextRequest) {
   const body = (await req.json()) as CreateZipRequest;
 
-  const zip = new JSZip();
-
-  const pathOverrides = body.pathOverrides ?? {};
   const expectedPaths = body.expectedPaths ?? [];
-
   const generatedFiles = body.generatedFiles ?? [];
-const uploadedFiles = body.openaiFileIdRefs ?? [];
+  const uploadedFiles = resolveUploadedFiles(body);
 
-if (generatedFiles.length === 0 && uploadedFiles.length === 0) {
-  throw new Error(
-    "At least one uploaded file or generated file is required. " +
-    "Send generatedFiles with path/contentBase64 or openaiFileIdRefs with pathOverrides."
-  );
-}
+  if (generatedFiles.length === 0 && uploadedFiles.length === 0) {
+    throw new Error(
+      "At least one uploaded file or generated file is required. Send generatedFiles and/or uploadedFiles."
+    );
+  }
 
   if (!Array.isArray(expectedPaths) || expectedPaths.length === 0) {
     throw new Error("expectedPaths is required and must contain the exact config.json file paths");
   }
 
+  const normalizedExpected = expectedPaths.map(normalizeZipPath);
+
+  if (!normalizedExpected.includes("config.json")) {
+    throw new Error("expectedPaths must include config.json at root");
+  }
+
+  const zip = new JSZip();
   const writtenPaths = new Set<string>();
 
   function addFile(targetPathRaw: string, content: Buffer | string) {
@@ -208,19 +257,18 @@ if (generatedFiles.length === 0 && uploadedFiles.length === 0) {
     writtenPaths.add(targetPath);
   }
 
- for (const generatedFile of generatedFiles) {
-  const targetPath = resolveGeneratedTargetPath(generatedFile);
-  const content = decodeGeneratedFile(generatedFile);
-  addFile(targetPath, content);
-}
+  for (const generatedFile of generatedFiles) {
+    const targetPath = resolveGeneratedTargetPath(generatedFile);
+    const content = decodeGeneratedFile(generatedFile);
+    addFile(targetPath, content);
+  }
 
-for (const uploadedRef of uploadedFiles) {
-  const fileId = getUploadedFileId(uploadedRef);
-  const targetPath = resolveUploadedTargetPath(uploadedRef, pathOverrides);
-  const content = await fetchOpenAIFileContent(fileId);
-  addFile(targetPath, content);
-}
-  assertExactArchiveMatchesExpected([...writtenPaths], expectedPaths);
+  for (const uploadedFile of uploadedFiles) {
+    const content = await fetchOpenAIFileContent(uploadedFile.fileId);
+    addFile(uploadedFile.targetPath, content);
+  }
+
+  assertExactArchiveMatchesExpected([...writtenPaths], normalizedExpected);
 
   const zipBuffer = await zip.generateAsync({
     type: "nodebuffer",
@@ -237,7 +285,10 @@ for (const uploadedRef of uploadedFiles) {
       : `${requestedName}.qapp`;
 
   if (body.returnMode === "binary") {
-    return new NextResponse(zipBuffer, {
+    // NextResponse in Next 16 expects BodyInit-compatible payload.
+    const binaryBody = new Uint8Array(zipBuffer);
+
+    return new NextResponse(binaryBody, {
       status: 200,
       headers: {
         "Content-Type": "application/octet-stream",
@@ -297,10 +348,7 @@ export async function POST(req: NextRequest) {
       return await unzipUploadedZip(req);
     }
 
-    return NextResponse.json(
-      { error: `Unknown action: ${action}` },
-      { status: 404 }
-    );
+    return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 404 });
   } catch (err) {
     return NextResponse.json(
       {
