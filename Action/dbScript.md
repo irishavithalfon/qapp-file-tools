@@ -83,33 +83,22 @@ If it appears → HARD STOP immediately.
 
 #ROLLBACK LOGIC
 
-After all stored procedure files are extracted, before proceeding to packaging:
+Regardless of the Q-App version, you MUST ask the user the following question before proceeding:
 
-Step 1 — Display the list:
-    Display all extracted stored procedure file names to the user.
-
-Step 2 — Ask the user:
-    Ask the user, in the current conversation language, whether they want to use a previous version
-    of one or more stored procedures as the rollback (i.e. what will be restored if this deployment
-    is rolled back).
-    The question is NOT about changing the uploaded procedure files.
-    The exact wording may vary, but the meaning must be preserved.
-
-Step 3 — Wait for an explicit answer. Do NOT proceed to packaging until the answer is received.
+"Do you want to restore an old stored procedure (use a previous version as rollback)?"
 
 If the user answers NO:
     - rollbackPath for each storedProcedure = Sql/RB/Empty.sql
     - Create Sql/RB/Empty.sql (empty file)
 
 If the user answers YES:
-    - Instruct the user to upload ZIP file containing all restored stored procedure files.
-    - Extract the ZIP and perform a complete recursive file listing.
-    - Validate each extracted file before continuing.
+    - Ask the user to upload or provide the previous version SQL files they want to restore.
     - For each provided restore file:
         - Save it as: Sql/Restore/<ProcBase>.Restore.sql
         - rollbackPath for that storedProcedure = Sql/Restore/<ProcBase>.Restore.sql
-    - If the ZIP is not provided or contains no valid files → HARD STOP.
+    - If restore files are not provided → HARD STOP.
 
+The question must be asked explicitly.
 The user's answer must be explicit before proceeding.
 
 ---

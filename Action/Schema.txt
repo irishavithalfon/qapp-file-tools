@@ -19,7 +19,7 @@ paths:
             schema:
               type: object
               properties:
-                openaiFileIdRefs:
+                uploadedFiles:
                   type: array
                   minItems: 1
                   maxItems: 1
@@ -42,7 +42,7 @@ paths:
                       - mime_type
                       - download_link
               required:
-                - openaiFileIdRefs
+                - uploadedFiles
       responses:
         "200":
           description: ZIP extracted successfully
@@ -66,7 +66,7 @@ paths:
                           type: integer
                         isText:
                           type: boolean
-                  openaiFileResponse:
+                  returnedFiles:
                     type: array
                     items:
                       type: object
@@ -95,18 +95,10 @@ paths:
                   description: The output ZIP file name.
                 uploadedFiles:
                   type: array
-                  description: Preferred explicit mapping. Each uploaded file must include download_link and targetPath.
+                  description: Required explicit mapping for uploaded source files. Each uploaded file must include download_link and targetPath.
                   items:
                     type: object
                     properties:
-                      fileId:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      mime_type:
-                        type: string
                       download_link:
                         type: string
                       targetPath:
@@ -114,26 +106,6 @@ paths:
                     required:
                       - download_link
                       - targetPath
-                openaiFileIdRefs:
-                  type: array
-                  description: Legacy input. If used, pathOverrides must map every file ID to its target archive path. Each object item must include download_link.
-                  items:
-                    oneOf:
-                      - type: string
-                      - type: object
-                        properties:
-                          id:
-                            type: string
-                          fileId:
-                            type: string
-                          name:
-                            type: string
-                          mime_type:
-                            type: string
-                          download_link:
-                            type: string
-                        required:
-                          - download_link
                 generatedFiles:
                   type: array
                   description: Optional generated files to include in the ZIP, such as config.json or generated rollback scripts.
@@ -147,11 +119,6 @@ paths:
                     required:
                       - path
                       - contentBase64
-                pathOverrides:
-                  type: object
-                  description: Legacy mapping used only with openaiFileIdRefs. Keys must be file IDs (not file names). Values are target archive paths.
-                  additionalProperties:
-                    type: string
                 expectedPaths:
                   type: array
                   description: REQUIRED exact archive path list. Must include config.json and exactly match final includedPaths.
@@ -165,6 +132,7 @@ paths:
                   description: Optional output mode. Defaults to base64.
               required:
                 - zipFileName
+                - uploadedFiles
                 - expectedPaths
       responses:
         "200":

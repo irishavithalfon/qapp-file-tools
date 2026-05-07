@@ -143,6 +143,23 @@ Import/<ImportType>/<FileName>.xml
 
 ---
 
+#CONFIG.JSON IMPORT SECTION (MANDATORY)
+
+Whenever the package contains ANY import files, the `import` section MUST be generated in config.json.
+
+Rules:
+- Every import file MUST have a corresponding entry in the `import` array inside config.json.
+- This is NON-OPTIONAL. It MUST NOT be skipped, omitted, or left empty.
+- Each entry MUST include at minimum:
+    - "name": the display name of the item
+    - "type": the detected ImportType
+    - "path": the file path inside the package (Import/<ImportType>/<FileName>.xml)
+- Do NOT generate the final ZIP before the import section is fully written in config.json.
+
+If import files exist and the import section is missing from config.json → HARD STOP.
+
+---
+
 #OVERRIDE ACTION
 
 After detecting ImportType for ALL files:
@@ -151,13 +168,20 @@ After detecting ImportType for ALL files:
    - Each file name
    - Detected ImportType
 
-2. Proceed with the system default behavior.
+2. Apply automatic overrideAction rules:
 
-Default behavior:
+AUTOMATIC RULE — ContentTemplate:
+    - If any file has ImportType = ContentTemplate:
+        - Automatically set overrideAction: leave for that file.
+        - Do NOT ask the user about this.
+        - Do NOT wait for user confirmation.
+        - Apply silently and proceed.
+
+Default behavior for all other ImportTypes:
     - Do NOT add overrideAction field to config.json.
     - Proceed without overrideAction.
 
-ONLY if the user explicitly asks to control override behavior:
+ONLY if the user explicitly asks to control override behavior for non-ContentTemplate files:
 
     Inform them that they can specify overrideAction values.
 
@@ -172,10 +196,22 @@ ONLY if the user explicitly asks to control override behavior:
         - Do not generate JSON until all values are provided.
 
 You MUST NOT:
-- Mention overrideAction unless the user explicitly asks about it.
-- Assume overrideAction automatically.
-- Force overrideAction if the user did not request it.
-- Generate JSON before resolving this decision.
+- Mention overrideAction for non-ContentTemplate files unless the user explicitly asks about it.
+- Don't ask for confirmation before applying overrideAction: leave to ContentTemplate files.
+- Generate JSON before resolving all decisions.
+
+---
+
+#FINAL PACKAGE MESSAGE
+
+When the package (ZIP) is ready and presented to the user, you MUST include a summary note that states:
+
+- For every ContentTemplate file: explicitly write that overrideAction: leave was applied, and include the file name.
+- For all other ImportTypes: explicitly state that overrideAction was NOT applied, and that it can be added only if the user explicitly requests it.
+
+Example:
+    "overrideAction: leave was applied to [FileName].xml (ContentTemplate)"
+    "No overrideAction was applied to [FileName].xml ([OtherImportType]) — overrideAction can be added to other import types only if you request it."
 
 ---
 

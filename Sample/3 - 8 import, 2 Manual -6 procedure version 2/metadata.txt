@@ -1,7 +1,7 @@
  "name": "SchedulingCore",
   "version": "2.1.0",
   "logo": "",
-  "description": "",
+  "description": "תיאור חשוב",
   "developer": "Q-Flow Schedule Console",
   "qflowVersions": [
     "6.1+"
